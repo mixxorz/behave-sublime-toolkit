@@ -3,6 +3,10 @@ from shutil import which
 import subprocess
 import threading
 
+# Conservatively import as little as possible
+from os.path import split as op_split
+from webbrowser import open as wb_open
+
 import sublime
 
 from .mixins.output_panel import OutputPanelMixin
@@ -51,6 +55,55 @@ class BehaveCommand(OutputPanelMixin,
                 raise Exception('behave could not be found. Is it installed?')
             return [behave]
 
+    def _get_project_folder(self):
+        """Gets the _last_ folder in the project to use as our cwd for the
+        `_launch_process()` in `subprocess.Popen()`.
+
+        We choose the last folder because it is more likely (IMO - MattDMo)
+        that if the user already has a project open, they'll add the desired
+        folder _last_ instead of first. YMMV.
+
+        If there are no folder entries in the project, we'll just return the
+        folder that houses the current file. Better than nothing I suppose...
+        """
+
+        proj_folders = self.view.window().folders()
+
+        # If there's at least one entry in the list, return the last element
+        if len(proj_folders) > 0:
+            return proj_folders[-1]
+
+        # Otherwise, show an informative dialog explaining the problem, open
+        # the docs to the "Getting Started" page, and return the folder the
+        # current file resides in. I have no idea if this is appropriate for
+        # all the commands, but it's something.
+        else:
+            if sublime.ok_cancel_dialog("You either do not have a folder "
+                                        "defined in your project, or you do "
+                                        "not have a project open. Please open "
+                                        "the folder that you would like to "
+                                        "have Behave Toolkit working on. For "
+                                        "now, we will use the folder of the "
+                                        "current file.\n\nPlease hit OK to "
+                                        "view the documentation on setting up "
+                                        "your project."):
+                wb_open("http://behavetoolkit.readthedocs.io/en/latest/gettingstarted.html")  # NOQA
+
+            # Let's try to get the file's path
+            try:
+                file_path = self.view.file_name()
+
+            # OK, view isn't saved. We'll give them a chance to save it.
+            except AttributeError:
+                sublime.ok_cancel_dialog("Please save the current view before "
+                                         "continuing.")
+                self.view.run_command("prompt_save_as")
+
+            # Now, we split the file path and return the folder's name.
+            finally:
+                file_folder, file_name = op_split(file_path)
+                return file_folder
+
     def _launch_process(self, command, print_stream=False):
         """Launches a process and returns its output as a string.
 
@@ -70,7 +123,7 @@ class BehaveCommand(OutputPanelMixin,
                                    stdout=subprocess.PIPE,
                                    bufsize=1,
                                    universal_newlines=True,
-                                   cwd=self.view.window().folders()[0],
+                                   cwd=self._get_project_folder(),
                                    startupinfo=startupinfo)
 
         if print_stream:
